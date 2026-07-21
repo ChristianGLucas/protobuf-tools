@@ -1,0 +1,375 @@
+// This file defines the data contracts (messages) for your Axiom package.
+// Every node's --input and --output refers to a message defined here.
+//
+// Run `axiom create message <Name>` to scaffold a new message below.
+// Run `axiom generate` to compile these definitions into language bindings in gen/.
+//
+// DOCUMENTATION
+//   Comments written directly above a message or field declaration are extracted
+//   automatically at publish time and shown in the Axiom registry as documentation.
+//   Write your descriptions there — no separate doc files needed.
+//
+//   Leading comment  (no blank line before the declaration) → registry description ✓
+//   Detached comment (blank line before the declaration)    → ignored by registry  ✗
+//
+// This file is yours to edit. Axiom only appends new message blocks — it never
+// overwrites or removes content you have written.
+
+syntax = "proto3";
+
+package christiangeorgelucas.protobuf_tools;
+
+// A (line, column) source location a parse or resolution error points to.
+// 1-based line numbers, matching protoc's own convention. `column` is
+// always 0 — protobufjs's parser reports line numbers only, never a
+// column, so this field is reserved for forward compatibility rather
+// than fabricated.
+message Location {
+  int32 line = 1;
+  int32 column = 2;
+}
+
+// A single structured .proto parse or validation error — never a crash or
+// an opaque exception. Schemas that fail to parse (syntax errors) or fail
+// semantic resolution (unresolvable type references, duplicate/reserved
+// field-number conflicts protobufjs itself catches at parse time) surface
+// here.
+message ProtoError {
+  string message = 1;
+  Location location = 2;
+}
+
+// One key/value option (a file-level `option ...;`, or a message/field/
+// service/method's bracketed or block option). `value` is the option's
+// value rendered as a string: scalars render directly (`"true"`, `"42"`,
+// `"com.demo.v1"`), aggregate (message-typed) option values render as
+// compact JSON.
+message OptionEntry {
+  string name = 1;
+  string value = 2;
+}
+
+// One field of a message, as declared in the .proto source.
+message FieldInfo {
+  // Field name exactly as declared (no case conversion).
+  string name = 1;
+  // The field's declared type: a scalar keyword (e.g. "int32", "string"),
+  // or a message/enum type reference exactly as written in the source
+  // (may be relative, e.g. "Inner", or absolute, e.g. ".pkg.Msg" — use
+  // ResolveTypeReference to get the fully-qualified name).
+  string type = 2;
+  // The field number (tag) used on the wire.
+  int32 number = 3;
+  // "repeated", "required", "optional", or "" (proto3 implicit singular
+  // field — present but with no explicit label keyword in source).
+  string label = 4;
+  // True if this is a proto3 `map<K, V>` field; `type` then holds the
+  // value type and `map_key_type` the key type.
+  bool is_map = 5;
+  string map_key_type = 6;
+  // True if a default was explicitly declared in source via
+  // `[default = ...]` (proto2 only — proto3 forbids explicit defaults).
+  bool explicit_default = 7;
+  // The field's effective default value, stringified: the explicit
+  // proto2 default when explicit_default is true, otherwise the type's
+  // implicit zero-value per the protobuf spec ("0", "", "false", the
+  // enum's first (zero-numbered) value's name, or "" for message/repeated/
+  // map fields, which have no scalar default).
+  string default_value = 8;
+  // Name of the `oneof` this field belongs to, or "" if none.
+  string oneof_name = 9;
+  // Field-level options, e.g. `[deprecated = true, json_name = "x"]`.
+  repeated OptionEntry options = 10;
+}
+
+// One message type found in a schema — a flat summary (not a recursive
+// tree): nested types are listed by simple name only, so walk the schema
+// again (with message_name set to "<full_name>.<NestedName>") to descend.
+message MessageSummary {
+  // Simple (unqualified) name, e.g. "Inner".
+  string name = 1;
+  // Fully-qualified dotted name including package and any enclosing
+  // message(s), without a leading dot, e.g. "demo.v1.Outer.Inner".
+  string full_name = 2;
+  // Simple names of message types nested directly inside this one.
+  repeated string nested_message_names = 3;
+  // Simple names of enum types nested directly inside this one.
+  repeated string nested_enum_names = 4;
+  int32 field_count = 5;
+}
+
+// One value of an enum type.
+message EnumValueInfo {
+  string name = 1;
+  int32 number = 2;
+}
+
+// One enum type found in a schema.
+message EnumSummary {
+  string name = 1;
+  string full_name = 2;
+  repeated EnumValueInfo values = 3;
+}
+
+// One RPC method of a service.
+message MethodInfo {
+  string name = 1;
+  // Fully-qualified input/output message type names (resolved, with a
+  // leading dot stripped), e.g. "demo.v1.HelloRequest".
+  string input_type = 2;
+  string output_type = 3;
+  bool client_streaming = 4;
+  bool server_streaming = 5;
+  repeated OptionEntry options = 6;
+}
+
+// One service found in a schema.
+message ServiceSummary {
+  string name = 1;
+  string full_name = 2;
+  repeated MethodInfo methods = 3;
+}
+
+// One contiguous inclusive field-number range marked `reserved` in a
+// message or enum (a single reserved number appears as start == end).
+message ReservedRange {
+  int32 start = 1;
+  int32 end = 2;
+}
+
+// Canonical input for every node that inspects a whole schema: the raw
+// .proto source text, always supplied as plain text by the caller.
+// Nothing is fetched, resolved over the network, or cached between
+// calls — a schema's `import` statements are reported as literal strings
+// (see GetPackageInfo) and never followed.
+message SchemaInput {
+  string schema = 1;
+}
+
+// Input for nodes that need a schema plus one message's dotted name
+// (simple, e.g. "Outer", or fully-qualified, e.g. "demo.v1.Outer" — both
+// are accepted; resolution walks outward from the package scope the same
+// way a .proto type reference does).
+message MessageNameInput {
+  string schema = 1;
+  string message_name = 2;
+}
+
+// Output of ParseSchema: the full structural parse of a schema.
+message ParseSchemaResult {
+  bool valid = 1;
+  // Set only when valid is false: the parse error(s). protobufjs stops at
+  // the first syntax error, so this is normally a single-element list.
+  repeated ProtoError errors = 2;
+  // "proto2", "proto3", an edition string (e.g. "2023"), or "unspecified"
+  // when no syntax statement is present (defaults to proto2 semantics
+  // per the protobuf spec). Set only when valid is true.
+  string syntax = 3;
+  string package = 4;
+  // Import paths exactly as declared, unresolved (never fetched).
+  repeated string imports = 5;
+  repeated MessageSummary messages = 6;
+  repeated EnumSummary enums = 7;
+  repeated ServiceSummary services = 8;
+  repeated OptionEntry file_options = 9;
+}
+
+// Output of ValidateSchema: full semantic well-formedness on top of
+// syntax — every referenced message/enum type must resolve.
+message ValidateSchemaResult {
+  bool valid = 1;
+  repeated ProtoError errors = 2;
+}
+
+// Output of DetectSyntaxVersion.
+message DetectSyntaxVersionResult {
+  bool valid = 1;
+  repeated ProtoError errors = 2;
+  // Set only when valid is true.
+  string syntax = 3;
+  // True if a `syntax = "...";` (or `edition = "...";`) statement is
+  // present in the source; false means it defaulted to "unspecified".
+  bool declared = 4;
+}
+
+// Output of ListMessages: every message type in the schema, in
+// declaration order, depth-first (parents appear before their nested
+// children).
+message ListMessagesResult {
+  bool valid = 1;
+  repeated ProtoError errors = 2;
+  repeated MessageSummary messages = 3;
+}
+
+// Output of GetMessageFields.
+message GetMessageFieldsResult {
+  // False if the schema failed to parse, or parsed but no message with
+  // that name exists — see `error` for which.
+  bool found = 1;
+  string error = 2;
+  string full_name = 3;
+  repeated FieldInfo fields = 4;
+}
+
+// Output of ListEnums: every enum type in the schema (top-level and
+// nested), in declaration order.
+message ListEnumsResult {
+  bool valid = 1;
+  repeated ProtoError errors = 2;
+  repeated EnumSummary enums = 3;
+}
+
+// Output of ListServices: every service in the schema, in declaration
+// order.
+message ListServicesResult {
+  bool valid = 1;
+  repeated ProtoError errors = 2;
+  repeated ServiceSummary services = 3;
+}
+
+// Input for GetServiceMethods.
+message ServiceNameInput {
+  string schema = 1;
+  string service_name = 2;
+}
+
+// Output of GetServiceMethods.
+message GetServiceMethodsResult {
+  bool found = 1;
+  string error = 2;
+  string full_name = 3;
+  repeated MethodInfo methods = 4;
+}
+
+// Output of ListFileOptions: every top-level (file-scope) `option ...;`
+// statement in the schema.
+message ListFileOptionsResult {
+  bool valid = 1;
+  repeated ProtoError errors = 2;
+  repeated OptionEntry options = 3;
+}
+
+// Output of ListMessageOptions.
+message ListMessageOptionsResult {
+  bool found = 1;
+  string error = 2;
+  repeated OptionEntry options = 3;
+}
+
+// Output of GetPackageInfo.
+message GetPackageInfoResult {
+  bool valid = 1;
+  repeated ProtoError errors = 2;
+  // "" if the schema has no `package` statement.
+  string package = 3;
+  repeated string imports = 4;
+  string syntax = 5;
+}
+
+// Input for ResolveTypeReference.
+message ResolveTypeReferenceInput {
+  string schema = 1;
+  // The type reference to resolve, exactly as it would appear in a field
+  // declaration: a scalar keyword, a bare/relative name ("Inner"), or an
+  // absolute name (".demo.v1.Outer.Inner").
+  string type_name = 2;
+  // Optional: the dotted name of the message to resolve `type_name`
+  // relative to (its declaration scope), mirroring how protoc resolves a
+  // field's type reference from within that message. Empty resolves
+  // relative to the file's package scope (the schema's top level).
+  string context_message = 3;
+}
+
+// Output of ResolveTypeReference.
+message ResolveTypeReferenceResult {
+  bool resolved = 1;
+  // Fully-qualified dotted name (no leading dot) when resolved is true:
+  // the scalar keyword itself for a scalar, otherwise the absolute
+  // message/enum path.
+  string fully_qualified_name = 2;
+  // "message", "enum", "scalar", or "unknown" (unresolved).
+  string kind = 3;
+  string error = 4;
+}
+
+// One (name, number) pair used by a message's fields, plus that
+// message's reserved ranges/names and any conflict between the two.
+message ListFieldNumbersResult {
+  bool found = 1;
+  string error = 2;
+  repeated FieldInfo fields = 3;
+  repeated ReservedRange reserved_ranges = 4;
+  repeated string reserved_names = 5;
+  // Field numbers that fall inside a reserved range. protobufjs itself
+  // rejects this at parse time IF the field is declared after the
+  // `reserved` statement — but not the reverse order (field declared,
+  // then later marked reserved), so a successfully-parsed schema can
+  // still contain this conflict; this list is computed independently of
+  // declaration order.
+  repeated int32 conflicting_numbers = 6;
+  // Field names that collide with a reserved name, independent of
+  // declaration order (same caveat as conflicting_numbers).
+  repeated string conflicting_names = 7;
+  bool has_conflicts = 8;
+}
+
+// Output of ToJsonDescriptor: the schema converted to protobufjs's JSON
+// descriptor representation (the same structural JSON produced by
+// `Root#toJSON()` — a nested-namespace object tree of messages/enums/
+// services), serialized as a JSON string.
+message ToJsonDescriptorResult {
+  bool valid = 1;
+  repeated ProtoError errors = 2;
+  string descriptor_json = 3;
+}
+
+// Output of SchemaSummary: coarse counts for a schema.
+message SchemaSummaryResult {
+  bool valid = 1;
+  repeated ProtoError errors = 2;
+  string package = 3;
+  string syntax = 4;
+  // Every message, top-level and nested.
+  int32 message_count = 5;
+  // Every enum, top-level and nested.
+  int32 enum_count = 6;
+  int32 service_count = 7;
+  // Total RPC methods across all services.
+  int32 method_count = 8;
+}
+
+// Input for EncodeMessage.
+message EncodeMessageInput {
+  string schema = 1;
+  // Dotted name of the message type to encode as.
+  string message_name = 2;
+  // The value to encode, as a JSON string (a JSON object matching the
+  // message's fields; protobuf's canonical proto3 JSON field-name
+  // convention is accepted — see FieldInfo.name for the declared name).
+  string json_value = 3;
+}
+
+// Output of EncodeMessage.
+message EncodeMessageResult {
+  bool ok = 1;
+  string error = 2;
+  // Base64-encoded protobuf wire-format bytes.
+  string wire_bytes_base64 = 3;
+  int32 byte_length = 4;
+}
+
+// Input for DecodeMessage.
+message DecodeMessageInput {
+  string schema = 1;
+  string message_name = 2;
+  // Base64-encoded protobuf wire-format bytes to decode.
+  string wire_bytes_base64 = 3;
+}
+
+// Output of DecodeMessage.
+message DecodeMessageResult {
+  bool ok = 1;
+  string error = 2;
+  // The decoded value, as a JSON string.
+  string json_value = 3;
+}

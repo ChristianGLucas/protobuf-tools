@@ -1,0 +1,222 @@
+name: christiangeorgelucas/protobuf-tools
+version: 0.1.0
+language: typescript
+description: >-
+  Deterministic parsing, validation, and structural inspection of Protocol
+  Buffers (.proto) schema definitions — proto2, proto3, and editions —
+  wrapping protobufjs (protobuf.js, BSD-3-Clause), the pure-JS reference
+  parser/reflection library. The schema is always supplied as caller text;
+  no node ever fetches an `import`, resolves one over the network, or
+  reaches the filesystem — declared imports are reported back as literal
+  unresolved strings. Covers full structural parsing (messages, enums,
+  services, options, package, imports), proto2/proto3/edition detection,
+  syntax-only parsing vs. full semantic reference validation, per-message
+  field extraction (name, type, number, label, default, oneof, map shape),
+  per-enum value listing, per-service RPC method listing (request/response
+  types, client/server streaming flags), file- and message-level option
+  listing, scope-aware type-reference resolution to a fully-qualified name,
+  field-number usage with reserved-range/reserved-name conflict detection
+  (independent of declaration order — protobufjs's own parser only catches
+  this one direction), conversion to protobufjs's JSON descriptor
+  representation, schema summary counts, and schema-driven message encode/
+  decode (JSON <-> protobuf wire bytes). Every node bounds input size and
+  brace-nesting depth up front and returns a structured, located error on
+  malformed input instead of crashing; wire-format payloads are capped
+  well under Axiom's transport limit.
+license: MIT
+author: Christian George Lucas
+tags:
+  - protobuf
+  - proto
+  - grpc
+  - schema
+  - descriptor
+  - idl
+  - protobufjs
+  - proto3
+  - proto2
+nodes:
+    - name: ParseSchema
+      input: SchemaInput
+      output: ParseSchemaResult
+      description: >-
+        Fully parses a .proto schema string with protobufjs's own parser,
+        returning every package/imports/syntax declaration plus every
+        message, enum, service, and file-level option found, in
+        declaration order. A malformed schema returns valid=false with a
+        structured, line-located syntax error instead of throwing —
+        protobufjs stops at the first syntax error, so errors is normally
+        a single-element list. This is a syntactic parse only (it does not
+        check that referenced types resolve); use ValidateSchema for full
+        semantic well-formedness.
+    - name: ValidateSchema
+      input: SchemaInput
+      output: ValidateSchemaResult
+      description: >-
+        Parses a schema and then runs protobufjs's full reference
+        resolution (`Root#resolveAll`) over it: every field/method type
+        reference must resolve to a real message or enum in the schema.
+        Returns valid=true, or valid=false with a structured error — a
+        syntax error (with line location) if the schema doesn't even
+        parse, or an unresolved-reference error (no line location;
+        protobufjs's resolver does not track one) otherwise.
+    - name: DetectSyntaxVersion
+      input: SchemaInput
+      output: DetectSyntaxVersionResult
+      description: >-
+        Detects which syntax dialect a schema declares — "proto2",
+        "proto3", an edition string (e.g. "2023"), or "unspecified" when
+        no `syntax`/`edition` statement is present (the protobuf spec's
+        own default: unspecified means proto2 semantics). Also parses the
+        schema to confirm it's at least syntactically valid; a parse
+        failure returns valid=false with the structured error instead.
+    - name: ListMessages
+      input: SchemaInput
+      output: ListMessagesResult
+      description: >-
+        Lists every message type defined in a schema, top-level and
+        nested, depth-first in declaration order — each with its simple
+        name, fully-qualified dotted name, direct nested-message/enum
+        simple names, and field count. A flat summary list, not a
+        recursive tree; use GetMessageFields for one message's actual
+        field definitions.
+    - name: GetMessageFields
+      input: MessageNameInput
+      output: GetMessageFieldsResult
+      description: >-
+        Looks up one message by simple or fully-qualified dotted name
+        (resolved the same way a .proto type reference resolves — walking
+        outward from the package scope) and returns every field it
+        declares directly: name, declared type, field number, label
+        (repeated/required/optional/""), map key/value shape, oneof
+        membership, field-level options, and effective default value
+        (the explicit proto2 `[default = ...]` when present, otherwise
+        the type's implicit proto3 zero-value). found=false with a
+        structured error if the schema fails to parse or no such message
+        exists.
+    - name: ListEnums
+      input: SchemaInput
+      output: ListEnumsResult
+      description: >-
+        Lists every enum type defined in a schema, top-level and nested,
+        each with its simple name, fully-qualified dotted name, and every
+        (name, number) value pair in declaration order.
+    - name: ListServices
+      input: SchemaInput
+      output: ListServicesResult
+      description: >-
+        Lists every gRPC service defined in a schema, each with its
+        fully-qualified name and every RPC method it declares (name,
+        resolved fully-qualified request/response type, client/server
+        streaming flags). Use GetServiceMethods to look up one service by
+        name directly.
+    - name: GetServiceMethods
+      input: ServiceNameInput
+      output: GetServiceMethodsResult
+      description: >-
+        Looks up one service by simple or fully-qualified dotted name and
+        returns its RPC methods (name, resolved fully-qualified request/
+        response type, client/server streaming flags, method-level
+        options). found=false with a structured error if the schema fails
+        to parse or no such service exists.
+    - name: ListFileOptions
+      input: SchemaInput
+      output: ListFileOptionsResult
+      description: >-
+        Lists every top-level (file-scope) `option name = value;`
+        statement declared in a schema — e.g. `java_package`,
+        `go_package`, `optimize_for` — as (name, stringified-value) pairs.
+        Does not include message/field/service/method-scoped options; see
+        ListMessageOptions for a message's own options.
+    - name: ListMessageOptions
+      input: MessageNameInput
+      output: ListMessageOptionsResult
+      description: >-
+        Looks up one message by name and lists the options declared
+        directly on it (e.g. `option deprecated = true;`) as
+        (name, stringified-value) pairs. found=false with a structured
+        error if the schema fails to parse or no such message exists (an
+        existing message with zero declared options returns found=true
+        with an empty list).
+    - name: GetPackageInfo
+      input: SchemaInput
+      output: GetPackageInfoResult
+      description: >-
+        Extracts a schema's `package` declaration (empty string if none),
+        every `import` path exactly as written (never fetched or
+        resolved — a schema's imports are always reported, never
+        followed), and its detected syntax dialect, in one call.
+    - name: ResolveTypeReference
+      input: ResolveTypeReferenceInput
+      output: ResolveTypeReferenceResult
+      description: >-
+        Resolves a type-reference string (a scalar keyword, e.g. "int32";
+        a bare/relative name, e.g. "Inner"; or an absolute dotted name,
+        e.g. ".demo.v1.Outer.Inner") to its fully-qualified form, using
+        protobufjs's own scope-climbing namespace lookup — the identical
+        algorithm protoc uses to resolve a field's type reference from
+        within its declaring message. Set context_message to resolve
+        relative to that message's scope (its enclosing message and
+        package, walking outward); omit it to resolve from the file's
+        package scope directly. resolved=false with kind="unknown" if
+        nothing matches.
+    - name: ListFieldNumbers
+      input: MessageNameInput
+      output: ListFieldNumbersResult
+      description: >-
+        Looks up one message and returns every field it declares (name,
+        number, and full FieldInfo) alongside its `reserved` ranges and
+        reserved names, plus any field whose number falls in a reserved
+        range or whose name matches a reserved name — computed
+        independently of declaration order. protobufjs's own parser
+        rejects this conflict at parse time only when the field is
+        declared AFTER the `reserved` statement; a field declared BEFORE
+        a later `reserved` statement marking its own number/name parses
+        successfully but is a real conflict, which this node still
+        surfaces via conflicting_numbers/conflicting_names/has_conflicts.
+    - name: ToJsonDescriptor
+      input: SchemaInput
+      output: ToJsonDescriptorResult
+      description: >-
+        Converts a parsed schema to protobufjs's JSON descriptor
+        representation (`Root#toJSON()`'s nested-namespace object tree of
+        messages/enums/services/options, keyed by name at each nesting
+        level), serialized as a JSON string. This is protobufjs's own
+        canonical machine-readable schema format, suitable for
+        reconstructing a `protobuf.Root` elsewhere via
+        `Root.fromJSON(...)` without re-parsing the original .proto text.
+    - name: SchemaSummary
+      input: SchemaInput
+      output: SchemaSummaryResult
+      description: >-
+        Reports coarse counts for a schema in one call — package, syntax
+        dialect, and the total number of messages (top-level + nested),
+        enums (top-level + nested), services, and RPC methods across all
+        services. valid=false with the structured parse error if the
+        schema doesn't parse.
+    - name: EncodeMessage
+      input: EncodeMessageInput
+      output: EncodeMessageResult
+      description: >-
+        Encodes a JSON value to protobuf wire-format bytes (base64-
+        encoded) for a message type looked up by name within the given
+        schema. The JSON value is verified against the message's own
+        field shape (`Type#verify`) BEFORE encoding, so a value with a
+        wrong-typed field is rejected with a structured error rather than
+        silently coerced (protobufjs's own `fromObject` would otherwise
+        turn an invalid value into a null/default field with no
+        indication anything was wrong). The encoded payload is capped at
+        3 MiB — comfortably under Axiom's ~4 MiB node-transport limit —
+        and rejects an oversized json_value up front rather than
+        attempting the encode.
+    - name: DecodeMessage
+      input: DecodeMessageInput
+      output: DecodeMessageResult
+      description: >-
+        Decodes base64-encoded protobuf wire-format bytes back to a JSON
+        value for a message type looked up by name within the given
+        schema. Malformed wire bytes (truncated, corrupt tag encoding, or
+        bytes that don't correspond to this message's field shape) return
+        ok=false with a structured error instead of throwing. Input bytes
+        are capped at 3 MiB, well under Axiom's ~4 MiB node-transport
+        limit.
