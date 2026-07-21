@@ -1,0 +1,28 @@
+# Demonstrates composing two protobuf-tools nodes: resolve a (possibly
+# relative) type reference to its fully-qualified name, then fetch that
+# message's fields. A realistic two-step tool chain.
+#
+# GetMessageFields also needs the raw schema text (every node here is a
+# stateless text-in/struct-out transform — none echoes the schema back in
+# its output for a downstream node to reuse), so it is supplied a second
+# time via a literal() bound to the SAME text used as this demo's runtime
+# input to ResolveTypeReference.
+name: resolve-then-fields
+description: "Resolve a type reference to its FQN, then fetch that message's fields."
+
+nodes:
+  - alias: resolve
+    package: christiangeorgelucas/protobuf-tools@0.1.0
+    node: ResolveTypeReference
+  - alias: fields
+    package: christiangeorgelucas/protobuf-tools@0.1.0
+    node: GetMessageFields
+
+edges:
+  - from: resolve
+    to: fields
+    adapter:
+      fully_qualified_name: message_name
+      "literal('syntax = \"proto3\"; package demo.v1; message Person { string name = 1; int32 age = 2; repeated string tags = 3; }')": schema
+
+start: resolve
