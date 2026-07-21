@@ -1,18 +1,20 @@
 import { EncodeMessageInput, EncodeMessageResult } from '../gen/messages_pb';
 import { AxiomContext } from '../gen/axiomContext';
-import { parseSchemaText, lookupMessage, byteLength, MAX_PAYLOAD_BYTES } from './lib';
+import { parseSchemaText, lookupMessage, byteLength, normalizeEnumFieldNames, MAX_PAYLOAD_BYTES } from './lib';
 
 /**
  * Encodes a JSON value to protobuf wire-format bytes (base64-encoded) for
- * a message type looked up by name within the given schema. The JSON
- * value is verified against the message's own field shape (`Type#verify`)
- * BEFORE encoding, so a value with a wrong-typed field is rejected with a
- * structured error rather than silently coerced (protobufjs's own
- * `fromObject` would otherwise turn an invalid value into a null/default
- * field with no indication anything was wrong). The encoded payload is
- * capped at 3 MiB — comfortably under Axiom's ~4 MiB node-transport limit
- * — and rejects an oversized json_value up front rather than attempting
- * the encode.
+ * a message type looked up by name within the given schema. Enum fields
+ * may be given as either their member name string (matching what
+ * DecodeMessage and GetMessageFields both report) or their numeric id, at
+ * any nesting depth. The value is verified against the message's own
+ * field shape (`Type#verify`) BEFORE encoding, so a value with a
+ * wrong-typed field is rejected with a structured error rather than
+ * silently coerced (protobufjs's own `fromObject` would otherwise turn an
+ * invalid value into a null/default field with no indication anything was
+ * wrong). The encoded payload is capped at 3 MiB — comfortably under
+ * Axiom's ~4 MiB node-transport limit — and rejects an oversized
+ * json_value up front rather than attempting the encode.
  *
  * @param ax - Platform context: ax.log for logging, ax.secrets for secrets.
  */
@@ -54,10 +56,16 @@ export function encodeMessage(ax: AxiomContext, input: EncodeMessageInput): Enco
     return out;
   }
 
+  // See normalizeEnumFieldNames' doc comment: Type#verify() (unlike
+  // fromObject()) rejects a valid enum member-name string, so normalize
+  // those to their numeric id first — a string that does NOT name a real
+  // member is left untouched, so verify() still rejects it below.
+  const normalized = normalizeEnumFieldNames(type, value) as Record<string, unknown>;
+
   // Reject BEFORE encoding rather than let fromObject() silently coerce a
   // wrong-typed field to null (verified against protobufjs 8.7.1:
   // Type#fromObject does not throw on a type mismatch, it drops the value).
-  const verifyError = type.verify(value as Record<string, unknown>);
+  const verifyError = type.verify(normalized);
   if (verifyError) {
     out.setOk(false);
     out.setError(verifyError);
@@ -65,7 +73,7 @@ export function encodeMessage(ax: AxiomContext, input: EncodeMessageInput): Enco
   }
 
   try {
-    const message = type.fromObject(value as Record<string, unknown>);
+    const message = type.fromObject(normalized);
     const bytes = type.encode(message).finish();
     if (bytes.byteLength > MAX_PAYLOAD_BYTES) {
       out.setOk(false);

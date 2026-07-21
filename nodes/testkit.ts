@@ -185,3 +185,22 @@ export const DEEPLY_NESTED_SCHEMA =
   '\nstring leaf = 1;\n' +
   '}'.repeat(70) +
   '\n';
+
+// A schema for exercising enum-by-name encode/decode, at both top level
+// and one nesting level deep (via a message-typed field), used to prove
+// EncodeMessage's enum-name normalization is genuinely recursive.
+export const ENUM_ROUND_TRIP_SCHEMA = `
+syntax = "proto3";
+enum Role {
+  ROLE_UNKNOWN = 0;
+  ROLE_ADMIN = 1;
+}
+message Inner {
+  Role role = 1;
+}
+message Outer {
+  Role role = 1;
+  Inner inner = 2;
+  repeated Role roles = 3;
+}
+`;

@@ -491,6 +491,64 @@ export function findReservedConflicts(type: protobuf.Type): { numbers: number[];
   return { numbers, names };
 }
 
+// ── Encode-side enum-name normalization ──────────────────────────────────
+// protobufjs's Type#fromObject() accepts an enum field given as EITHER its
+// numeric id or its member name string, resolving the name recursively at
+// any depth. Type#verify() does NOT: it rejects a valid member name string
+// outright ("role: enum value expected"), even though the exact same value
+// passed straight to fromObject() converts correctly (verified against
+// protobufjs 8.7.1). Since EncodeMessage calls verify() first — precisely
+// so a genuinely wrong-typed field is rejected instead of silently
+// coerced by fromObject() — that mismatch meant a caller could never
+// round-trip DecodeMessage's own output (which renders enums as their
+// name string, matching GetMessageFields' documented convention) back
+// through EncodeMessage. This walks the value tree, using the message's
+// own field/type reflection to find enum-typed fields (scalar, repeated,
+// or a map's value) and resolves any string that names a real member to
+// its number — leaving anything else (including an unrecognized string)
+// untouched so verify() still catches a genuine type error. Recursion is
+// bounded by MAX_NESTING_DEPTH for the same reason parseSchemaText's
+// reflection walks are: a malicious value tree cannot recurse past it.
+export function normalizeEnumFieldNames(type: protobuf.Type, value: unknown, depth = 0): unknown {
+  if (depth > MAX_NESTING_DEPTH || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...obj };
+  for (const field of type.fieldsArray) {
+    const key = Object.prototype.hasOwnProperty.call(out, field.name)
+      ? field.name
+      : Object.prototype.hasOwnProperty.call(out, field.protoName || '')
+        ? (field.protoName as string)
+        : null;
+    if (key === null) continue;
+    const resolved = field.resolvedType;
+    const normalizeOne = (v: unknown): unknown => {
+      if (resolved instanceof protobuf.Enum && typeof v === 'string') {
+        const num = resolved.values[v];
+        return num !== undefined ? num : v;
+      }
+      if (resolved instanceof protobuf.Type) {
+        return normalizeEnumFieldNames(resolved, v, depth + 1);
+      }
+      return v;
+    };
+    const fieldValue = out[key];
+    if (field instanceof protobuf.MapField) {
+      if (fieldValue && typeof fieldValue === 'object' && !Array.isArray(fieldValue)) {
+        const mapOut: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(fieldValue as Record<string, unknown>)) mapOut[k] = normalizeOne(v);
+        out[key] = mapOut;
+      }
+    } else if (field.repeated && Array.isArray(fieldValue)) {
+      out[key] = fieldValue.map(normalizeOne);
+    } else {
+      out[key] = normalizeOne(fieldValue);
+    }
+  }
+  return out;
+}
+
 // ── Lookups ──────────────────────────────────────────────────────────────
 
 export function lookupMessage(root: protobuf.Root, name: string): protobuf.Type | null {
