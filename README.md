@@ -1,6 +1,6 @@
 # protobuf-tools
 
-Composable [Axiom](https://axiom.co) nodes for deterministic parsing, validation, and
+Composable [Axiom](https://axiomide.com) nodes for deterministic parsing, validation, and
 structural inspection of Protocol Buffers (`.proto`) schema definitions — proto2, proto3,
 and editions — wrapping [protobufjs](https://github.com/protobufjs/protobuf.js)
 (protobuf.js, BSD-3-Clause), the pure-JS reference `.proto` parser and reflection library.
