@@ -46,14 +46,4 @@ describe('DecodeMessage', () => {
     expect(out.getOk()).toBe(false);
     expect(out.getError()).toMatch(/no message named/);
   });
-
-  it('rejects an oversized wire_bytes_base64 before attempting to decode it', () => {
-    const input = new DecodeMessageInput();
-    input.setSchema(POINT_SCHEMA);
-    input.setMessageName('Point');
-    input.setWireBytesBase64('A'.repeat(3 * 1024 * 1024 + 1));
-    const out = decodeMessage(ctx, input);
-    expect(out.getOk()).toBe(false);
-    expect(out.getError()).toMatch(/exceeds/);
-  });
 });

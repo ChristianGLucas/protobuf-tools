@@ -170,22 +170,6 @@ message Deprecated {
 }
 `;
 
-// A schema exceeding MAX_SCHEMA_BYTES (1,000,000 bytes) — a single huge
-// comment, so it stays otherwise-valid .proto text and the size check is
-// what actually rejects it.
-export const OVERSIZED_SCHEMA = `syntax = "proto3";\n// ${'x'.repeat(1_000_001)}\nmessage M { string a = 1; }\n`;
-
-// A schema exceeding MAX_NESTING_DEPTH (60) brace-nesting levels — 70
-// nested empty message blocks. Used to prove the pre-parse depth guard
-// rejects it before it ever reaches protobufjs's recursive-descent parser
-// (which would otherwise be the thing at risk of a stack overflow).
-export const DEEPLY_NESTED_SCHEMA =
-  'syntax = "proto3";\n' +
-  Array.from({ length: 70 }, (_, i) => `message M${i} {`).join('\n') +
-  '\nstring leaf = 1;\n' +
-  '}'.repeat(70) +
-  '\n';
-
 // A schema for exercising enum-by-name encode/decode, at both top level
 // and one nesting level deep (via a message-typed field), used to prove
 // EncodeMessage's enum-name normalization is genuinely recursive.

@@ -34,9 +34,8 @@ state.
 - **SchemaSummary** — message/enum/service/method counts
 - **EncodeMessage** / **DecodeMessage** — schema-driven JSON <-> protobuf wire-byte conversion
 
-Every node bounds input size and brace-nesting depth up front and returns a structured,
-located error on malformed input instead of crashing. Wire-format payloads are capped well
-under Axiom's ~4 MiB node-transport limit.
+Every node returns a structured, located error on malformed input (a syntax error, an
+unresolved reference, corrupt wire bytes) instead of crashing.
 
 ## License
 

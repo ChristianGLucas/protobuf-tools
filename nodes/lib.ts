@@ -2,8 +2,8 @@
 // node. Every node file is a thin wrapper: decode proto input -> call a
 // helper (which does the real work through protobufjs's own parser and
 // reflection API) -> encode proto output. Keeping the protobufjs-specific
-// glue here (rather than duplicated per node) is what keeps error shape,
-// size/depth bounds, and default-value computation consistent across nodes.
+// glue here (rather than duplicated per node) is what keeps error shape
+// and default-value computation consistent across nodes.
 
 import * as protobuf from 'protobufjs';
 import {
@@ -18,85 +18,6 @@ import {
   ServiceSummary,
   ReservedRange,
 } from '../gen/messages_pb';
-
-// ── Input-surface bounds ────────────────────────────────────────────────
-// Every node caps the raw schema text at this many bytes, checked BEFORE
-// any parsing begins — this bounds memory/CPU cost as a function of the
-// dimension every node here takes from the caller: schema text length. A
-// real-world .proto file is typically well under 100 KB; 1 MB is generous
-// headroom for a legitimately large schema while still rejecting an
-// intentionally huge payload outright.
-export const MAX_SCHEMA_BYTES = 1_000_000;
-
-// protobufjs's parser recurses once per nested `message { ... }` /
-// `{ }` block. A schema engineered with thousands of nested empty
-// messages could exhaust the call stack before we ever get a structured
-// parse error back — a crash, not a rejection. We scan the RAW TEXT for
-// max brace-nesting depth (skipping string/comment content so a deeply
-// nested string literal doesn't false-positive) and reject up front if it
-// exceeds this. No legitimate .proto schema nests anywhere close to this
-// deep (real-world schemas rarely exceed 5-10 levels).
-export const MAX_NESTING_DEPTH = 60;
-
-// Wire-format / JSON-value payload cap for EncodeMessage/DecodeMessage.
-// Axiom's node-to-node gRPC transport caps messages at ~4 MiB; this stays
-// comfortably under that regardless of base64/JSON encoding overhead.
-export const MAX_PAYLOAD_BYTES = 3 * 1024 * 1024;
-
-export function byteLength(text: string): number {
-  return Buffer.byteLength(text, 'utf8');
-}
-
-export function isTooLarge(text: string): boolean {
-  return byteLength(text) > MAX_SCHEMA_BYTES;
-}
-
-// Scans raw .proto source for the maximum brace-nesting depth, ignoring
-// braces that appear inside a "..." string literal, a // line comment, or
-// a /* */ block comment (the only three .proto lexical contexts where a
-// literal '{' or '}' does not affect block structure). Best-effort: it
-// does not implement full .proto string-escaping rules, but for the sole
-// purpose of bounding recursion depth before handing the text to
-// protobufjs's real parser, an approximate scan is exactly as safe as an
-// exact one — the real parser is still the source of truth for validity.
-export function maxBraceDepth(text: string): number {
-  let depth = 0;
-  let maxDepth = 0;
-  let i = 0;
-  const n = text.length;
-  while (i < n) {
-    const c = text[i];
-    if (c === '"' || c === "'") {
-      const quote = c;
-      i++;
-      while (i < n && text[i] !== quote) {
-        if (text[i] === '\\') i++;
-        i++;
-      }
-      i++;
-      continue;
-    }
-    if (c === '/' && text[i + 1] === '/') {
-      i += 2;
-      while (i < n && text[i] !== '\n') i++;
-      continue;
-    }
-    if (c === '/' && text[i + 1] === '*') {
-      i += 2;
-      while (i < n && !(text[i] === '*' && text[i + 1] === '/')) i++;
-      i += 2;
-      continue;
-    }
-    if (c === '{') {
-      depth++;
-      if (depth > maxDepth) maxDepth = depth;
-    } else if (c === '}') {
-      depth = Math.max(0, depth - 1);
-    }
-    i++;
-  }
-  return maxDepth;
-}
 
 // ── Structured errors ────────────────────────────────────────────────────
 
@@ -128,14 +49,6 @@ export function errorFromException(e: unknown): ProtoError {
   return mkError(message, line, 0);
 }
 
-export function sizeError(): ProtoError {
-  return mkError(`schema exceeds the ${MAX_SCHEMA_BYTES}-byte size limit`);
-}
-
-export function depthError(): ProtoError {
-  return mkError(`schema exceeds the max brace-nesting depth of ${MAX_NESTING_DEPTH}`);
-}
-
 // ── Parsing ──────────────────────────────────────────────────────────────
 
 export interface ParseOutcome {
@@ -145,16 +58,10 @@ export interface ParseOutcome {
   errors: ProtoError[];
 }
 
-// Parses raw .proto text with protobufjs. Never throws: a size violation,
-// depth violation, or a genuine syntax error all come back as a
-// structured ProtoError in `errors` with `root: null`.
+// Parses raw .proto text with protobufjs. Never throws: a genuine syntax
+// error comes back as a structured ProtoError in `errors` with
+// `root: null`.
 export function parseSchemaText(schema: string): ParseOutcome {
-  if (isTooLarge(schema)) {
-    return { root: null, pkg: '', imports: [], errors: [sizeError()] };
-  }
-  if (maxBraceDepth(schema) > MAX_NESTING_DEPTH) {
-    return { root: null, pkg: '', imports: [], errors: [depthError()] };
-  }
   try {
     const result = protobuf.parse(schema, new protobuf.Root(), { keepCase: true });
     // Best-effort semantic resolution. This populates per-field feature
@@ -200,8 +107,6 @@ export function parseSchemaText(schema: string): ParseOutcome {
 // Parsing fresh guarantees this is the first-and-only resolveAll() call
 // on this root.
 export function validateSchemaText(schema: string): { valid: boolean; errors: ProtoError[] } {
-  if (isTooLarge(schema)) return { valid: false, errors: [sizeError()] };
-  if (maxBraceDepth(schema) > MAX_NESTING_DEPTH) return { valid: false, errors: [depthError()] };
   let root: protobuf.Root;
   try {
     root = protobuf.parse(schema, new protobuf.Root(), { keepCase: true }).root;
@@ -425,40 +330,33 @@ export function buildServiceSummary(svc: protobuf.Service): ServiceSummary {
 }
 
 // Depth-first walk of every message in the tree (top-level and nested, in
-// declaration order), bounded so a schema cannot be crafted to recurse
-// past MAX_NESTING_DEPTH even though a successful parse already implies
-// the brace-depth pre-check passed (defense in depth, not redundant: the
-// pre-check bounds SOURCE TEXT depth; this bounds the REFLECTION TREE
-// walk, which is the actual recursive call each of these nodes performs).
-export function walkMessages(ns: protobuf.NamespaceBase, out: MessageSummary[] = [], depth = 0): MessageSummary[] {
-  if (depth > MAX_NESTING_DEPTH) return out;
+// declaration order).
+export function walkMessages(ns: protobuf.NamespaceBase, out: MessageSummary[] = []): MessageSummary[] {
   for (const nested of ns.nestedArray) {
     if (nested instanceof protobuf.Type) {
       out.push(buildMessageSummary(nested));
-      walkMessages(nested, out, depth + 1);
+      walkMessages(nested, out);
     } else if (nested instanceof protobuf.Namespace && !(nested instanceof protobuf.Service)) {
-      walkMessages(nested, out, depth + 1);
+      walkMessages(nested, out);
     }
   }
   return out;
 }
 
-export function walkEnums(ns: protobuf.NamespaceBase, out: EnumSummary[] = [], depth = 0): EnumSummary[] {
-  if (depth > MAX_NESTING_DEPTH) return out;
+export function walkEnums(ns: protobuf.NamespaceBase, out: EnumSummary[] = []): EnumSummary[] {
   for (const nested of ns.nestedArray) {
     if (nested instanceof protobuf.Enum) {
       out.push(buildEnumSummary(nested));
     } else if (nested instanceof protobuf.Type) {
-      walkEnums(nested, out, depth + 1);
+      walkEnums(nested, out);
     } else if (nested instanceof protobuf.Namespace && !(nested instanceof protobuf.Service)) {
-      walkEnums(nested, out, depth + 1);
+      walkEnums(nested, out);
     }
   }
   return out;
 }
 
-export function walkServices(ns: protobuf.NamespaceBase, out: ServiceSummary[] = [], depth = 0): ServiceSummary[] {
-  if (depth > MAX_NESTING_DEPTH) return out;
+export function walkServices(ns: protobuf.NamespaceBase, out: ServiceSummary[] = []): ServiceSummary[] {
   for (const nested of ns.nestedArray) {
     if (nested instanceof protobuf.Service) {
       out.push(buildServiceSummary(nested));
@@ -467,7 +365,7 @@ export function walkServices(ns: protobuf.NamespaceBase, out: ServiceSummary[] =
       // (a message) — real .proto grammar never nests a service inside a
       // message, but walking uniformly costs nothing and needs no
       // special-casing.
-      walkServices(nested, out, depth + 1);
+      walkServices(nested, out);
     }
   }
   return out;
@@ -506,11 +404,9 @@ export function findReservedConflicts(type: protobuf.Type): { numbers: number[];
 // own field/type reflection to find enum-typed fields (scalar, repeated,
 // or a map's value) and resolves any string that names a real member to
 // its number — leaving anything else (including an unrecognized string)
-// untouched so verify() still catches a genuine type error. Recursion is
-// bounded by MAX_NESTING_DEPTH for the same reason parseSchemaText's
-// reflection walks are: a malicious value tree cannot recurse past it.
-export function normalizeEnumFieldNames(type: protobuf.Type, value: unknown, depth = 0): unknown {
-  if (depth > MAX_NESTING_DEPTH || value === null || typeof value !== 'object' || Array.isArray(value)) {
+// untouched so verify() still catches a genuine type error.
+export function normalizeEnumFieldNames(type: protobuf.Type, value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return value;
   }
   const obj = value as Record<string, unknown>;
@@ -529,7 +425,7 @@ export function normalizeEnumFieldNames(type: protobuf.Type, value: unknown, dep
         return num !== undefined ? num : v;
       }
       if (resolved instanceof protobuf.Type) {
-        return normalizeEnumFieldNames(resolved, v, depth + 1);
+        return normalizeEnumFieldNames(resolved, v);
       }
       return v;
     };

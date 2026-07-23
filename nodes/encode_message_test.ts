@@ -106,14 +106,4 @@ describe('EncodeMessage', () => {
     const out = encodeMessage(ctx, input);
     expect(out.getOk()).toBe(true);
   });
-
-  it('rejects an oversized json_value before attempting to parse or encode it', () => {
-    const input = new EncodeMessageInput();
-    input.setSchema(POINT_SCHEMA);
-    input.setMessageName('Point');
-    input.setJsonValue('x'.repeat(3 * 1024 * 1024 + 1));
-    const out = encodeMessage(ctx, input);
-    expect(out.getOk()).toBe(false);
-    expect(out.getError()).toMatch(/exceeds/);
-  });
 });

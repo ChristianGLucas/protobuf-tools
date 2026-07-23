@@ -1,6 +1,6 @@
 import { SchemaInput } from '../gen/messages_pb';
 import { parseSchema } from './parse_schema';
-import { ctx, PROTO3_SCHEMA, BROKEN_SCHEMA, OVERSIZED_SCHEMA, DEEPLY_NESTED_SCHEMA } from './testkit';
+import { ctx, PROTO3_SCHEMA, BROKEN_SCHEMA } from './testkit';
 
 describe('ParseSchema', () => {
   it('parses a full proto3 schema into packages/messages/enums/services/options', () => {
@@ -46,21 +46,5 @@ describe('ParseSchema', () => {
     expect(err.getMessage()).toMatch(/';' expected/);
     expect(err.getLocation()?.getLine()).toBe(5);
     expect(out.getMessagesList()).toHaveLength(0);
-  });
-
-  it('rejects a schema over the byte-size limit before attempting to parse it', () => {
-    const input = new SchemaInput();
-    input.setSchema(OVERSIZED_SCHEMA);
-    const out = parseSchema(ctx, input);
-    expect(out.getValid()).toBe(false);
-    expect(out.getErrorsList()[0].getMessage()).toMatch(/exceeds the 1000000-byte size limit/);
-  });
-
-  it('rejects a schema over the brace-nesting depth limit before handing it to the parser', () => {
-    const input = new SchemaInput();
-    input.setSchema(DEEPLY_NESTED_SCHEMA);
-    const out = parseSchema(ctx, input);
-    expect(out.getValid()).toBe(false);
-    expect(out.getErrorsList()[0].getMessage()).toMatch(/max brace-nesting depth/);
   });
 });

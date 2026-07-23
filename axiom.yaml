@@ -1,5 +1,5 @@
 name: christiangeorgelucas/protobuf-tools
-version: 0.1.0
+version: 0.1.1
 language: typescript
 description: >-
   Deterministic parsing, validation, and structural inspection of Protocol
@@ -19,10 +19,9 @@ description: >-
   (independent of declaration order — protobufjs's own parser only catches
   this one direction), conversion to protobufjs's JSON descriptor
   representation, schema summary counts, and schema-driven message encode/
-  decode (JSON <-> protobuf wire bytes). Every node bounds input size and
-  brace-nesting depth up front and returns a structured, located error on
-  malformed input instead of crashing; wire-format payloads are capped
-  well under Axiom's transport limit.
+  decode (JSON <-> protobuf wire bytes). Every node returns a structured,
+  located error on malformed input (a syntax error, an unresolved
+  reference, corrupt wire bytes) instead of crashing.
 license: MIT
 author: Christian George Lucas
 tags:
@@ -205,10 +204,7 @@ nodes:
         wrong-typed field is rejected with a structured error rather than
         silently coerced (protobufjs's own `fromObject` would otherwise
         turn an invalid value into a null/default field with no
-        indication anything was wrong). The encoded payload is capped at
-        3 MiB — comfortably under Axiom's ~4 MiB node-transport limit —
-        and rejects an oversized json_value up front rather than
-        attempting the encode.
+        indication anything was wrong).
     - name: DecodeMessage
       input: DecodeMessageInput
       output: DecodeMessageResult
@@ -217,6 +213,4 @@ nodes:
         value for a message type looked up by name within the given
         schema. Malformed wire bytes (truncated, corrupt tag encoding, or
         bytes that don't correspond to this message's field shape) return
-        ok=false with a structured error instead of throwing. Input bytes
-        are capped at 3 MiB, well under Axiom's ~4 MiB node-transport
-        limit.
+        ok=false with a structured error instead of throwing.

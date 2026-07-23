@@ -1,6 +1,6 @@
 import { EncodeMessageInput, EncodeMessageResult } from '../gen/messages_pb';
 import { AxiomContext } from '../gen/axiomContext';
-import { parseSchemaText, lookupMessage, byteLength, normalizeEnumFieldNames, MAX_PAYLOAD_BYTES } from './lib';
+import { parseSchemaText, lookupMessage, normalizeEnumFieldNames } from './lib';
 
 /**
  * Encodes a JSON value to protobuf wire-format bytes (base64-encoded) for
@@ -12,20 +12,13 @@ import { parseSchemaText, lookupMessage, byteLength, normalizeEnumFieldNames, MA
  * wrong-typed field is rejected with a structured error rather than
  * silently coerced (protobufjs's own `fromObject` would otherwise turn an
  * invalid value into a null/default field with no indication anything was
- * wrong). The encoded payload is capped at 3 MiB — comfortably under
- * Axiom's ~4 MiB node-transport limit — and rejects an oversized
- * json_value up front rather than attempting the encode.
+ * wrong).
  *
  * @param ax - Platform context: ax.log for logging, ax.secrets for secrets.
  */
 export function encodeMessage(ax: AxiomContext, input: EncodeMessageInput): EncodeMessageResult {
   const out = new EncodeMessageResult();
   const jsonValue = input.getJsonValue();
-  if (byteLength(jsonValue) > MAX_PAYLOAD_BYTES) {
-    out.setOk(false);
-    out.setError(`json_value exceeds the ${MAX_PAYLOAD_BYTES}-byte payload limit`);
-    return out;
-  }
 
   const parsed = parseSchemaText(input.getSchema());
   if (!parsed.root) {
@@ -75,11 +68,6 @@ export function encodeMessage(ax: AxiomContext, input: EncodeMessageInput): Enco
   try {
     const message = type.fromObject(normalized);
     const bytes = type.encode(message).finish();
-    if (bytes.byteLength > MAX_PAYLOAD_BYTES) {
-      out.setOk(false);
-      out.setError(`encoded message exceeds the ${MAX_PAYLOAD_BYTES}-byte payload limit`);
-      return out;
-    }
     out.setOk(true);
     out.setWireBytesBase64(Buffer.from(bytes).toString('base64'));
     out.setByteLength(bytes.byteLength);
